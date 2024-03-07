@@ -91,7 +91,7 @@ def plot_nutritional_values(
     Args:
         nutrVal: pandas DataFrame, nutritional values
     '''
-    f, axs = plt.subplots(1,5,figsize=(16,3))
+    f, axs = plt.subplots(1,7,figsize=(20,2))
 
     axs[0].plot(sorted(nutrVal['calories']))
     axs[0].set_yscale('log')
@@ -112,6 +112,14 @@ def plot_nutritional_values(
     axs[4].plot(sorted(nutrVal['protein']))
     axs[4].set_yscale('log')
     axs[4].set_title('Protein Distribution')
+
+    axs[5].plot(sorted(nutrVal['saturatedFat']))
+    axs[5].set_yscale('log')
+    axs[5].set_title('Saturated Fat Distribution')
+
+    axs[6].plot(sorted(nutrVal['carbs']))
+    axs[6].set_yscale('log')
+    axs[6].set_title('Carbs Distribution')
 
     plt.show()
 
@@ -161,8 +169,22 @@ def get_nutritional_values(
     if verbose: 
         print(f"{d_range[1]-d_range[0]}% of protein data lies between " +
         f"{protein_range[0]:.2f} and {protein_range[1]:.2f}")
+
+    sat_fat_range = (
+        np.percentile(nutrVal['saturatedFat'], d_range[0]),
+        np.percentile(nutrVal['saturatedFat'], d_range[1]))
+    if verbose:
+        print(f"{d_range[1]-d_range[0]}% of saturated fat data lies between " +
+        f"{sat_fat_range[0]:.2f} and {sat_fat_range[1]:.2f}")
+
+    carbs_range = (
+        np.percentile(nutrVal['carbs'], d_range[0]),
+        np.percentile(nutrVal['carbs'], d_range[1]))
+    if verbose:
+        print(f"{d_range[1]-d_range[0]}% of carbs data lies between " +
+        f"{carbs_range[0]:.2f} and {carbs_range[1]:.2f}")
     
-    return calories_range, fat_range, sugar_range, sodium_range, protein_range
+    return calories_range, fat_range, sugar_range, sodium_range, protein_range, sat_fat_range, carbs_range
 
 def plot_interactions_distribution(
         gds, 
@@ -193,7 +215,6 @@ def plot_interactions_distribution(
     plt.figtext(0.83, 0.5, get_percentiles(reviews_df).to_string())
 
     plt.show()
-
 
 def plot_recipe_interactions_distribution(
         gds, 

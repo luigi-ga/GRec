@@ -1,4 +1,5 @@
 import time
+import numpy as np
 
 def get_node_counts(
         gds,
@@ -136,8 +137,8 @@ def get_hops_count(
 def get_user_favourite_ingredients(
         gds, 
         user_id, 
-        max_fav_ingr, 
         excluded_ingr,
+        percentil=50,
         verbose=True
         ):
     '''
@@ -158,19 +159,22 @@ def get_user_favourite_ingredients(
         WHERE (rel.rating >= 4 OR TYPE(rel) = 'SUBMITTED') AND NOT i.name IN $excluded_ingr
         WITH i, COUNT(r) AS favCount, COLLECT(r.id) AS favRecipes
         ORDER BY favCount DESC
-        LIMIT $limit
         RETURN i.name AS favoriteIngredient, favCount, favRecipes
         ''', params={
             'userId': user_id, 
-            'limit': max_fav_ingr, 
             'excluded_ingr': excluded_ingr})
+    if not query.empty:
+        # Calculate the threshold count for the given percentile
+        # To do so, we need to remove duplicates and calculate the percentile
+        threshold_count = np.percentile(list(set(query['favCount'])), percentil)
+        # Filter the DataFrame for ingredients above the threshold
+        query = query[query['favCount'] >= threshold_count]
     end_time = time.time()
     if verbose: print(f'\nQuery executed in {end_time-start_time:.2f} seconds')
     return query
 
 def get_recipe_w_ingreds(
         gds, 
-        n_suggestions, 
         excluded_recipes, 
         favorite_ingredients, 
         verbose=True
@@ -197,9 +201,7 @@ def get_recipe_w_ingreds(
             SIZE(recipeIngredients) AS totalIngredients,
             (toFloat(SIZE([ingredient IN recipeIngredients WHERE ingredient IN $favIngreds])) / SIZE(recipeIngredients) * log(1 + SIZE(recipeIngredients))) AS relevanceScore
         ORDER BY relevanceScore DESC
-        LIMIT $limit
         ''', params={
-            'limit': n_suggestions, 
             'excludedRecipes': excluded_recipes,
             'favIngreds': favorite_ingredients})
     end_time = time.time()
@@ -229,7 +231,9 @@ def get_user_nutritional_values(
                 nutritionList[1] AS totalFat,
                 nutritionList[2] AS sugar,
                 nutritionList[3] AS sodium,
-                nutritionList[4] AS protein
+                nutritionList[4] AS protein,
+                nutritionList[5] AS saturatedFat,
+                nutritionList[6] AS carbs
         ''', params={
             'userID': user_id})
     end_time = time.time()
@@ -238,13 +242,14 @@ def get_user_nutritional_values(
 
 def get_recipe_nutritional_values(
         gds, 
-        n_suggestions, 
         interacted_recipes, 
         calories_range, 
         fat_range, 
         sugar_range, 
         sodium_range, 
         protein_range,
+        sat_fat_range, 
+        carbs_range,
         verbose=True
         ):
     '''
@@ -272,23 +277,24 @@ def get_recipe_nutritional_values(
         AND nutritionList[2] > $min_1 AND nutritionList[2] < $max_2    // SUGAR (PVD)
         AND nutritionList[3] > $min_3 AND nutritionList[3] < $max_3    // SODIUM (PDV)
         AND nutritionList[4] > $min_4 AND nutritionList[4] < $max_4    // PROTEIN
+        AND nutritionList[5] > $min_5 AND nutritionList[5] < $max_5    // SATURATED FAT (PDV)
+        AND nutritionList[6] > $min_6 AND nutritionList[6] < $max_6    // CARBS
     RETURN r.id as recipeID, r.name AS recipeName, nutritionList
-    LIMIT $limit
-    ''', params={
-        'limit': n_suggestions, 
+    ''', params={ 
         'interactedRecipes': interacted_recipes,
         'min_0': calories_range[0], 'max_0': calories_range[1],
         'min_1': fat_range[0], 'max_1': fat_range[1],
         'min_2': sugar_range[0], 'max_2': sugar_range[1],
         'min_3': sodium_range[0], 'max_3': sodium_range[1],
-        'min_4': protein_range[0], 'max_4': protein_range[1]})
+        'min_4': protein_range[0], 'max_4': protein_range[1],
+        'min_5': sat_fat_range[0], 'max_5': sat_fat_range[1],
+        'min_6': carbs_range[0], 'max_6': carbs_range[1]})
     end_time = time.time()
     if verbose: print(f'\nQuery executed in {end_time-start_time:.2f} seconds')
     return query
 
 def get_recipe_nutritional_ingreds(
         gds, 
-        n_suggestions, 
         interacted_recipes, 
         favorite_ingredients,
         calories_range, 
@@ -296,6 +302,8 @@ def get_recipe_nutritional_ingreds(
         sugar_range, 
         sodium_range, 
         protein_range,
+        sat_fat_range,
+        carbs_range,
         verbose=True
         ):
     '''
@@ -328,19 +336,21 @@ def get_recipe_nutritional_ingreds(
         AND nutritionList[2] > $min_1 AND nutritionList[2] < $max_2    // SUGAR (PVD)
         AND nutritionList[3] > $min_3 AND nutritionList[3] < $max_3    // SODIUM (PDV)
         AND nutritionList[4] > $min_4 AND nutritionList[4] < $max_4    // PROTEIN
+        AND nutritionList[5] > $min_5 AND nutritionList[5] < $max_5    // SATURATED FAT (PDV)
+        AND nutritionList[6] > $min_6 AND nutritionList[6] < $max_6    // CARBS
     RETURN  r.id as recipeID, r.name AS recipeName, recipeIngredients, nutritionList,
             (toFloat(SIZE([ingredient IN recipeIngredients WHERE ingredient IN $favIngreds])) / SIZE(recipeIngredients) * log(1 + SIZE(recipeIngredients))) AS relevanceScore
     ORDER BY relevanceScore DESC
-    LIMIT $limit
     ''', params={
-        'limit': n_suggestions, 
         'interactedRecipes': interacted_recipes,
         'favIngreds': favorite_ingredients,
         'min_0': calories_range[0], 'max_0': calories_range[1],
         'min_1': fat_range[0], 'max_1': fat_range[1],
         'min_2': sugar_range[0], 'max_2': sugar_range[1],
         'min_3': sodium_range[0], 'max_3': sodium_range[1],
-        'min_4': protein_range[0], 'max_4': protein_range[1]})
+        'min_4': protein_range[0], 'max_4': protein_range[1],
+        'min_5': sat_fat_range[0], 'max_5': sat_fat_range[1],
+        'min_6': carbs_range[0], 'max_6': carbs_range[1]})
     end_time = time.time()
     if verbose: print(f'\nQuery executed in {end_time-start_time:.2f} seconds')
     return query
@@ -372,7 +382,7 @@ def get_user_top_tags(
         gds, 
         user_id, 
         excluded_tags, 
-        max_tags=10,
+        percentil=50,
         verbose=True
         ):
     '''
@@ -386,7 +396,6 @@ def get_user_top_tags(
         verbose: bool, print the execution time
     '''
     start_time = time.time()
-    # MATCH (u:User {id:$user_id})-[:REVIEWED {rating:5}]->(r:Recipe)
     query = gds.run_cypher('''
         MATCH (u:User {id:$user_id})-[rel:SUBMITTED|REVIEWED]->(r:Recipe)
         WHERE (rel.rating >= 4 OR TYPE(rel) = 'SUBMITTED')
@@ -396,18 +405,21 @@ def get_user_top_tags(
         WHERE NOT tag IN $excluded_tags
         RETURN tag, COUNT(*) AS tagCount
         ORDER BY tagCount DESC
-        LIMIT $max_tags
         ''', params={
             'user_id': user_id, 
-            'max_tags': max_tags,
             'excluded_tags': excluded_tags})
+    if not query.empty:
+        # Calculate the threshold count for the given percentile
+        # To do so, we need to remove duplicates and calculate the percentile
+        threshold_count = np.percentile(list(set(query['tagCount'])), percentil)
+        # Filter the DataFrame for tags count above the threshold
+        query = query[query['tagCount'] >= threshold_count]
     end_time = time.time()
     if verbose: print(f'\nQuery executed in {end_time-start_time:.2f} seconds')
     return query
 
 def find_top_tag_matching_recipes(
         gds, 
-        n_suggestions, 
         interacted_recipes, 
         top_tags,
         verbose=True
@@ -434,9 +446,7 @@ def find_top_tag_matching_recipes(
             SIZE(tagList) AS totalTags,
             (toFloat(SIZE([tag IN tagList WHERE tag IN $topTags])) / SIZE(tagList) * log(1 + SIZE(tagList))) AS relevanceScore
         ORDER BY relevanceScore DESC
-        LIMIT $limit
-        ''', params={
-            'limit': n_suggestions, 
+        ''', params={ 
             'interactedRecipes': interacted_recipes,
             'topTags': top_tags})
     end_time = time.time()
@@ -445,7 +455,6 @@ def find_top_tag_matching_recipes(
 
 def find_matching_recipes_with_nutrition_and_tags(
         gds, 
-        n_suggestions, 
         interacted_recipes, 
         favorite_ingredients, 
         top_tags, 
@@ -454,6 +463,8 @@ def find_matching_recipes_with_nutrition_and_tags(
         sugar_range, 
         sodium_range, 
         protein_range,
+        sat_fat_range,
+        carbs_range,
         verbose=True
         ):
     '''
@@ -485,6 +496,8 @@ def find_matching_recipes_with_nutrition_and_tags(
             AND nutritionList[2] > $min_1 AND nutritionList[2] < $max_2    // SUGAR (PVD)
             AND nutritionList[3] > $min_3 AND nutritionList[3] < $max_3    // SODIUM (PDV)
             AND nutritionList[4] > $min_4 AND nutritionList[4] < $max_4    // PROTEIN
+            AND nutritionList[5] > $min_5 AND nutritionList[5] < $max_5    // SATURATED FAT (PDV)
+            AND nutritionList[6] > $min_6 AND nutritionList[6] < $max_6    // CARBS
             AND ANY(tag IN tagList WHERE tag IN $topTags)
         RETURN r.id AS recipeID, r.name AS recipeName,
             SIZE([ingredient IN recipeIngredients WHERE ingredient IN $favIngreds]) AS matchingIngreds,
@@ -492,9 +505,7 @@ def find_matching_recipes_with_nutrition_and_tags(
             (toFloat(SIZE([ingredient IN recipeIngredients WHERE ingredient IN $favIngreds])) / SIZE(recipeIngredients) * log(1 + SIZE(recipeIngredients))) AS ingrRelScore,
             (toFloat(SIZE([tag IN tagList WHERE tag IN $topTags])) / SIZE(tagList) * log(1 + SIZE(tagList))) AS tagRelScore
         ORDER BY (ingrRelScore + tagRelScore) DESC
-        LIMIT $limit
         ''', params={
-            'limit': n_suggestions, 
             'favIngreds': favorite_ingredients,
             'interactedRecipes': interacted_recipes,
             'topTags': top_tags,
@@ -502,7 +513,9 @@ def find_matching_recipes_with_nutrition_and_tags(
             'min_1': fat_range[0], 'max_1': fat_range[1],
             'min_2': sugar_range[0], 'max_2': sugar_range[1],
             'min_3': sodium_range[0], 'max_3': sodium_range[1],
-            'min_4': protein_range[0], 'max_4': protein_range[1]})
+            'min_4': protein_range[0], 'max_4': protein_range[1],
+            'min_5': sat_fat_range[0], 'max_5': sat_fat_range[1],
+            'min_6': carbs_range[0], 'max_6': carbs_range[1]})
     end_time = time.time()
     if verbose: print(f'\nQuery executed in {end_time-start_time:.2f} seconds')
     return query
