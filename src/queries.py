@@ -91,7 +91,7 @@ def get_user_interactions(
     '''
     start_time = time.time()
     query = gds.run_cypher('''
-        MATCH (u:User {id: $userId})-[i:SUBMITTED|REVIEWED]->(r:Recipe)
+        MATCH (u:User {id: $userID})-[i:SUBMITTED|REVIEWED]->(r:Recipe)
         RETURN r.id AS recipeID,
             r.name AS name,
             r.nutrition AS nutrition,
@@ -99,7 +99,7 @@ def get_user_interactions(
             COALESCE(i.submitted, i.date) AS interactionDate,
             type(i) AS interactionType
         ORDER BY interactionType, interactionDate DESC
-        ''', params={'userId': user_id})
+        ''', params={'userID': user_id})
     end_time = time.time()
     if verbose: print(f'\nQuery executed in {end_time-start_time:.2f} seconds')
     return query
@@ -120,16 +120,16 @@ def get_hops_count(
     '''
     start_time = time.time()
     query = gds.run_cypher('''
-        MATCH (u1:User {id: $userId})-[r:REVIEWED|SUBMITTED]->(recipe:Recipe)
+        MATCH (u1:User {id: $userID})-[r:REVIEWED|SUBMITTED]->(recipe:Recipe)
         WITH u1, COLLECT(recipe) AS userRecipes
         MATCH (u1)-[:REVIEWED]->(r1:Recipe)<-[:REVIEWED|SUBMITTED]-(u2:User)-[:REVIEWED|SUBMITTED]->(r2:Recipe)
         WHERE NOT r2 IN userRecipes
-        RETURN u1.id AS userId,
+        RETURN u1.id AS userID,
             COUNT(DISTINCT r1) AS interactedRecipesCount,
             COUNT(DISTINCT u2) AS likeUsersCount,
             COUNT(DISTINCT r2) AS potentialRecommendationsCount
         ''', params={
-            'userId': user_id})
+            'userID': user_id})
     end_time = time.time()
     if verbose: print(f'\nQuery executed in {end_time-start_time:.2f} seconds')
     return query
@@ -139,10 +139,11 @@ def get_user_favourite_ingredients(
         user_id, 
         excluded_ingr,
         percentil=50,
-        verbose=True
+        verbose=True,
+        version=1
         ):
     '''
-    Returns the top max_fav_ingr of an user excluding excluded_ingr.
+    Returns the favorite ingredients of an user excluding excluded_ingr.
     User favorite ingredients are extracted from the recipes the user
     has published and from the recipe the user evaluated with 5 rating.
 
@@ -155,13 +156,13 @@ def get_user_favourite_ingredients(
     '''
     start_time = time.time()
     query = gds.run_cypher('''                                                  
-        MATCH (u:User {id: $userId})-[rel:REVIEWED|SUBMITTED]->(r:Recipe)-[:WITH_INGREDIENTS]->(i:Ingredient)
+        MATCH (u:User {id: $userID})-[rel:REVIEWED|SUBMITTED]->(r:Recipe)-[:WITH_INGREDIENTS]->(i:Ingredient)
         WHERE (rel.rating >= 4 OR TYPE(rel) = 'SUBMITTED') AND NOT i.name IN $excluded_ingr
         WITH i, COUNT(r) AS favCount, COLLECT(r.id) AS favRecipes
         ORDER BY favCount DESC
         RETURN i.name AS favoriteIngredient, favCount, favRecipes
         ''', params={
-            'userId': user_id, 
+            'userID': user_id, 
             'excluded_ingr': excluded_ingr})
     if not query.empty:
         # Calculate the threshold count for the given percentile
@@ -181,11 +182,10 @@ def get_recipe_w_ingreds(
         ):
     '''
     Returns recipies that have the same ingredients as favorite_ingredients, 
-    excluding from those excluded_recipes and limiting the output to n_suggestions
+    excluding from those excluded_recipes
 
     Args:
         gds: Graph Data Science driver
-        n_suggestions: int, number of suggestions to return
         excluded_recipes: list, list of recipes to be excluded
         favorite_ingredients: list, list of favorite ingredients
         verbose: bool, print the execution time
@@ -254,17 +254,18 @@ def get_recipe_nutritional_values(
         ):
     '''
     Returns recipies that have the same nutritional values as the given ranges,
-    excluding from those interacted_recipes and limiting the output to n_suggestions
+    excluding from those interacted_recipes
 
     Args:
         gds: Graph Data Science driver
-        n_suggestions: int, number of suggestions to return
         interacted_recipes: list, list of recipes the user has interacted with
         calories_range: tuple, range of calories
         fat_range: tuple, range of fat
         sugar_range: tuple, range of sugar
         sodium_range: tuple, range of sodium
         protein_range: tuple, range of protein
+        sat_fat_range: tuple, range of saturated fat
+        carbs_range: tuple, range of carbs
         verbose: bool, print the execution time
     '''
     start_time = time.time()
@@ -309,12 +310,10 @@ def get_recipe_nutritional_ingreds(
     '''
     Returns recipies that have the same nutritional values as the given ranges
     and ingredients as favorite_ingredients, excluding from those interacted_recipes
-    and limiting the output to n_suggestions. The output is ordered by the number of
-    matching ingredients with the favorite ones.
+    The output is ordered by the number of matching ingredients with the favorite ones.
 
     Args:
         gds: Graph Data Science driver
-        n_suggestions: int, number of suggestions to return
         interacted_recipes: list, list of recipes the user has interacted with
         favorite_ingredients: list, list of favorite ingredients
         calories_range: tuple, range of calories
@@ -322,6 +321,8 @@ def get_recipe_nutritional_ingreds(
         sugar_range: tuple, range of sugar
         sodium_range: tuple, range of sodium
         protein_range: tuple, range of protein
+        sat_fat_range: tuple, range of saturated fat
+        carbs_range: tuple, range of carbs
         verbose: bool, print the execution time
     '''
     start_time = time.time()
@@ -426,11 +427,10 @@ def find_top_tag_matching_recipes(
         ):
     '''
     Returns recipies that have the same tags as top_tags, excluding from those
-    interacted_recipes and limiting the output to n_suggestions
+    interacted_recipes
 
     Args:
         gds: Graph Data Science driver
-        n_suggestions: int, number of suggestions to return
         interacted_recipes: list, list of recipes the user has interacted with
         top_tags: list, list of top tags
         verbose: bool, print the execution time
@@ -469,12 +469,10 @@ def find_matching_recipes_with_nutrition_and_tags(
         ):
     '''
     Returns recipies that have the same tags as top_tags and ingredients as
-    favorite_ingredients, excluding from those interacted_recipes and limiting
-    the output to n_suggestions
+    favorite_ingredients, excluding from those interacted_recipes
 
     Args:
         gds: Graph Data Science driver
-        n_suggestions: int, number of suggestions to return
         interacted_recipes: list, list of recipes the user has interacted with
         favorite_ingredients: list, list of favorite ingredients
         top_tags: list, list of top tags
@@ -483,6 +481,8 @@ def find_matching_recipes_with_nutrition_and_tags(
         sugar_range: tuple, range of sugar
         sodium_range: tuple, range of sodium
         protein_range: tuple, range of protein
+        sat_fat_range: tuple, range of saturated fat
+        carbs_range: tuple, range of carbs
         verbose: bool, print the execution time
     '''
     start_time = time.time()
